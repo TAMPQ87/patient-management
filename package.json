@@ -1,0 +1,16 @@
+{
+  "name": "patient-management-demo4",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "xlsx": "^0.18.5",
+    "moment": "^2.29.4",
+    "multer": "^1.4.5-lts.1"
+  }
+}
