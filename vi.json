@@ -137,13 +137,16 @@
         "next": "Sau",
         "previous": "Trước",
         "seconds": "Giây",
-        "amPm": [
-            "am",
-            "pm"
-        ],
+        "amPm": ["am", "pm"],
         "unknown": "-",
         "weekdays": [
-            "Chủ nhật"
+            "Chủ nhật",
+            "Thứ hai",
+            "Thứ ba",
+            "Thứ tư",
+            "Thứ năm",
+            "Thứ sáu",
+            "Thứ bảy"
         ]
     },
     "emptyTable": "Không có dữ liệu",
@@ -173,7 +176,7 @@
             "title": "Sửa mục"
         },
         "error": {
-            "system": "Đã xảy ra lỗi hệ thống (&lt;a target=\"\\\" rel=\"nofollow\" href=\"\\\"&gt;Thêm thông tin&lt;\/a&gt;)."
+            "system": "Đã xảy ra lỗi hệ thống (<a target=\"\\\" rel=\"nofollow\" href=\"\\\">Thêm thông tin<\/a>)."
         },
         "multi": {
             "info": "Các mục đã chọn chứa các giá trị khác nhau cho đầu vào này. Để chỉnh sửa và đặt tất cả các mục cho đầu vào này thành cùng một giá trị, hãy nhấp hoặc nhấn vào đây, nếu không chúng sẽ giữ lại các giá trị riêng lẻ của chúng.",

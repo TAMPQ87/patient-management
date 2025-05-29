@@ -1,6 +1,8 @@
 $(document).ready(function() {
     let table;
     let isEditMode = false;
+    let currentPage = 1;
+    let currentReportParams = {};
 
     // Khởi tạo date picker với bản địa hóa tiếng Việt
     flatpickr('#examDate, #reExamDate, #reportDate, #endDate', {
@@ -9,33 +11,30 @@ $(document).ready(function() {
         placeholder: 'dd/mm/yyyy',
         locale: 'vn',
         altInput: true,
-        altFormat: 'd/m/Y'
+        altFormat: 'd/m/Y',
+        defaultDate: ['#reportDate', new Date()] // Đặt mặc định ngày hiện tại
     });
+
+    // Hàm hiển thị thông báo
+    function showMessage(message, type = 'success') {
+        const alertDiv = $(`<div class="alert alert-${type} alert-dismissible fade show" role="alert"></div>`)
+            .text(message)
+            .append('<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>');
+        $('.alert-container').empty().append(alertDiv);
+        setTimeout(() => alertDiv.alert('close'), 5000);
+    }
 
     // Hàm kiểm tra ngày hợp lệ
     function isValidDate(dateStr) {
-        if (!dateStr) return true; // Ngày rỗng là hợp lệ
-        if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
-            return false; // Sai định dạng
-        }
-        const [day, month, year] = dateStr.split('/').map(Number);
-        if (year < 1900 || year > 2025 || month < 1 || month > 12 || day < 1 || day > 31) {
-            return false; // Ngoài phạm vi
-        }
-        const date = new Date(year, month - 1, day);
-        return date.getDate() === day && date.getMonth() === month - 1 && date.getFullYear() === year;
+        return moment(dateStr, 'DD/MM/YYYY', true).isValid();
     }
 
     // Hàm tính trạng thái tái khám
     function getReExamStatus(reExamDate, warningDays) {
-        if (!reExamDate || !/^\d{2}\/\d{2}\/\d{4}$/.test(reExamDate)) {
+        if (!reExamDate || !isValidDate(reExamDate)) {
             return { status: 'none', label: 'Không có ngày' };
         }
-        const [day, month, year] = reExamDate.split('/').map(Number);
-        const reExam = new Date(year, month - 1, day);
-        if (isNaN(reExam.getTime())) {
-            return { status: 'none', label: 'Ngày không hợp lệ' };
-        }
+        const reExam = moment(reExamDate, 'DD/MM/YYYY').toDate();
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const diffDays = Math.round((reExam - today) / (1000 * 60 * 60 * 24));
@@ -47,8 +46,32 @@ $(document).ready(function() {
         } else if (diffDays <= warningDays) {
             return { status: 'upcoming', label: `Sắp đến (${diffDays} ngày)` };
         } else {
-            return { status: 'due', label: 'Bình thường' };
+            return { status: 'normal', label: 'Bình thường' };
         }
+    }
+
+    // Hàm hiển thị phân trang
+    function renderPagination(totalPages, currentPage) {
+        let paginationHtml = '<nav><ul class="pagination justify-content-center">';
+        paginationHtml += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${currentPage - 1}">Trước</a></li>`;
+        for (let i = 1; i <= totalPages; i++) {
+            paginationHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+        }
+        paginationHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${currentPage + 1}">Sau</a></li>`;
+        paginationHtml += '</ul></nav>';
+        $('#pagination').html(paginationHtml);
+
+        $('.page-link').on('click', function(e) {
+            e.preventDefault();
+            const page = parseInt($(this).data('page'));
+            if (page && page !== currentPage) {
+                currentPage = page;
+                generateReport();
+            }
+        });
     }
 
     // Khởi tạo DataTable
@@ -56,45 +79,18 @@ $(document).ready(function() {
         if (table) {
             table.destroy();
             $('#patientTable tbody').empty();
-            $('#patientTable thead').empty().append(`
-                <tr>
-                    <th>STT</th>
-                    <th>Họ và Tên</th>
-                    <th>Năm sinh</th>
-                    <th>Giới tính</th>
-                    <th>Nhà</th>
-                    <th>Thuốc</th>
-                    <th>Ngày khám</th>
-                    <th>Ngày tái khám</th>
-                    <th>Trạng thái tái khám</th>
-                    <th>Khu vực</th>
-                    <th>Hành động</th>
-                </tr>
-            `);
-        }
-        console.log('Dữ liệu tải vào bảng:', JSON.stringify(data, null, 2));
-        if (!data || !Array.isArray(data) || data.length === 0) {
-            console.warn('Không có dữ liệu để hiển thị trong bảng');
-            data = [];
         }
         const warningDays = parseInt($('#warningDays').val()) || 7;
-        // Sử dụng reExamStatus từ server nếu có, nếu không thì tính lại
         data = data.map(row => ({
             ...row,
-            reExamStatus: row.reExamStatus || getReExamStatus(row.reExamDate, warningDays)
+            reExamStatus: getReExamStatus(row.reExamDate, warningDays)
         }));
 
-        // Cảnh báo ngày không hợp lệ
-        const invalidDatePatients = data.filter(row => row.invalidDate);
-        if (invalidDatePatients.length > 0) {
-            const patientList = invalidDatePatients.map(p => `STT ${p.id}: ${p.name}`).join('\n');
-            alert(`Cảnh báo: Có ${invalidDatePatients.length} bệnh nhân có ngày không hợp lệ:\n${patientList}\nVui lòng chỉnh sửa thông tin bệnh nhân!`);
-        }
-
-        // Cảnh báo bệnh nhân quá hạn
-        const overduePatients = data.filter(row => row.reExamStatus.status === 'overdue');
-        if (overduePatients.length > 0) {
-            alert(`Cảnh báo: Có ${overduePatients.length} bệnh nhân đã quá hạn tái khám!`);
+        // Hiển thị tổng quan báo cáo
+        const overdueCount = data.filter(row => row.reExamStatus.status === 'overdue').length;
+        $('#reportSummary').html(`Tổng số bệnh nhân: ${data.length}. Quá hạn: ${overdueCount}`);
+        if (overdueCount > 0) {
+            showMessage(`Cảnh báo: Có ${overdueCount} bệnh nhân đã quá hạn tái khám!`, 'warning');
         }
 
         table = $('#patientTable').DataTable({
@@ -135,55 +131,30 @@ $(document).ready(function() {
                 }
             ],
             pageLength: 10,
-            language: { url: '/vi.json' },
-            drawCallback: function() {
-                console.log('Bảng đã được vẽ lại');
-            },
+            language: { url: '//cdn.datatables.net/plug-ins/1.11.5/i18n/vi.json' },
             rowCallback: function(row, data) {
-                if (data.reExamStatus.status !== 'none') {
-                    $(row).find('td:eq(8)').addClass(`status-${data.reExamStatus.status}`);
-                }
-                if (data.invalidDate) {
-                    $(row).find('td:eq(7)').addClass('status-overdue');
-                }
+                $(row).find('td:eq(8)').addClass(`status-${data.reExamStatus.status}`);
             }
         });
 
-        table.column(9).visible(false);
-
+        // Bộ lọc khu vực
         $('#areaFilter').off('change').on('change', function() {
             const area = $(this).val();
-            console.log(`Lọc khu vực: ${area}`);
             if (area === 'all') {
                 table.column(9).search('').draw();
             } else {
-                table.column(9).search(`^Khu ${area}$`, true, false).draw();
+                table.column(9).search(`^${area}$`, true, false).draw();
             }
-        });
-
-        $('#statusFilter').off('change').on('change', function() {
-            const status = $(this).val();
-            console.log(`Lọc trạng thái tái khám: ${status}`);
-            if (status === 'all') {
-                table.column(8).search('').draw();
-            } else {
-                table.column(8).search(status, true, false).draw();
-            }
-        });
-
-        $('#warningDays').off('change').on('change', function() {
-            loadPatients();
         });
     }
 
     // Tải danh sách bệnh nhân
     function loadPatients() {
         $.getJSON('/patients', function(patients) {
-            console.log('Dữ liệu nhận từ /patients:', JSON.stringify(patients, null, 2));
             initTable(patients);
+            $('#pagination').empty();
         }).fail(function(jqXHR, textStatus, error) {
-            console.error('Lỗi tải bệnh nhân:', textStatus, error, jqXHR.responseText);
-            alert('Không thể tải dữ liệu bệnh nhân: ' + error);
+            showMessage('Không thể tải dữ liệu bệnh nhân: ' + error, 'danger');
             initTable([]);
         });
     }
@@ -202,26 +173,25 @@ $(document).ready(function() {
             reExamDate: $('#reExamDate').val() || '',
             area: $('#area').val() || ''
         };
-        console.log('Dữ liệu gửi:', JSON.stringify(patient, null, 2));
 
         if (!patient.id || !patient.name || !patient.year || !patient.gender || !patient.area) {
-            alert('Vui lòng nhập đầy đủ STT, Họ và Tên, Năm sinh, Giới tính, Phân khu');
+            showMessage('Vui lòng nhập đầy đủ STT, Họ và Tên, Năm sinh, Giới tính, Phân khu', 'danger');
             return;
         }
         if (patient.year < 1900 || patient.year > 2025) {
-            alert('Năm sinh phải từ 1900 đến 2025');
+            showMessage('Năm sinh phải từ 1900 đến 2025', 'danger');
             return;
         }
         if (!['I', 'II'].includes(patient.area)) {
-            alert('Phân khu phải là I hoặc II');
+            showMessage('Phân khu phải là I hoặc II', 'danger');
             return;
         }
         if (patient.examDate && !isValidDate(patient.examDate)) {
-            alert('Ngày khám không hợp lệ. Vui lòng nhập theo định dạng dd/mm/yyyy và là ngày có thật (ví dụ: 30/04/2025).');
+            showMessage('Ngày khám không hợp lệ', 'danger');
             return;
         }
         if (patient.reExamDate && !isValidDate(patient.reExamDate)) {
-            alert('Ngày tái khám không hợp lệ. Vui lòng nhập theo định dạng dd/mm/yyyy và là ngày có thật (ví dụ: 30/04/2025).');
+            showMessage('Ngày tái khám không hợp lệ', 'danger');
             return;
         }
 
@@ -235,8 +205,7 @@ $(document).ready(function() {
             contentType: 'application/json',
             data: JSON.stringify(isEditMode ? { ...patient, originalId } : patient),
             success: function(response) {
-                console.log('Phản hồi:', response);
-                alert(isEditMode ? 'Cập nhật bệnh nhân thành công!' : 'Lưu bệnh nhân thành công!');
+                showMessage(isEditMode ? 'Cập nhật bệnh nhân thành công!' : 'Lưu bệnh nhân thành công!');
                 $('#patientForm')[0].reset();
                 $('#patientModal').modal('hide');
                 isEditMode = false;
@@ -245,50 +214,70 @@ $(document).ready(function() {
             },
             error: function(jqXHR, textStatus, errorThrown) {
                 const errorMessage = jqXHR.responseJSON?.error || errorThrown;
-                console.error('Lỗi:', {
-                    status: jqXHR.status,
-                    textStatus: textStatus,
-                    error: errorMessage,
-                    responseText: jqXHR.responseText
-                });
-                alert('Lỗi: ' + errorMessage);
+                showMessage('Lỗi: ' + errorMessage, 'danger');
             }
         });
     });
 
     // Tạo báo cáo
-    $('#generateReportBtn').on('click', function() {
+    function generateReport() {
         const reportDate = $('#reportDate').val()?.trim();
         const endDate = $('#endDate').val()?.trim();
         const reportType = $('#reportType').val();
         const area = $('#areaFilter').val();
-        console.log(`Yêu cầu báo cáo: ngày=${reportDate}, kiểu=${reportType}, khu=${area}, ngày kết thúc=${endDate}`);
-        if (!reportDate || !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(reportDate)) {
-            alert('Vui lòng nhập ngày bắt đầu theo định dạng dd/mm/yyyy');
+        const warningDays = parseInt($('#warningDays').val()) || 7;
+        const selectedStatuses = $('.status-checkbox:checked').map(function() {
+            return $(this).val();
+        }).get();
+
+        if (!reportDate || !isValidDate(reportDate)) {
+            showMessage('Vui lòng nhập ngày bắt đầu hợp lệ (dd/mm/yyyy)', 'danger');
             return;
         }
-        if (reportType === 'range' && (!endDate || !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(endDate))) {
-            alert('Vui lòng nhập ngày kết thúc theo định dạng dd/mm/yyyy');
+        if (reportType === 'range') {
+            if (!endDate || !isValidDate(endDate)) {
+                showMessage('Vui lòng nhập ngày kết thúc hợp lệ (dd/mm/yyyy)', 'danger');
+                return;
+            }
+            if (moment(endDate, 'DD/MM/YYYY').isBefore(moment(reportDate, 'DD/MM/YYYY'))) {
+                showMessage('Ngày kết thúc phải sau ngày bắt đầu', 'danger');
+                return;
+            }
+        }
+        if (selectedStatuses.length === 0) {
+            showMessage('Vui lòng chọn ít nhất một trạng thái tái khám', 'danger');
             return;
         }
-        const normalizedDate = reportDate.replace(/(\d{1,2})\/(\d{1,2})\/(\d{4})/, (match, day, month, year) => {
-            return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
-        });
-        const normalizedEndDate = endDate ? endDate.replace(/(\d{1,2})\/(\d{1,2})\/(\d{4})/, (match, day, month, year) => {
-            return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
-        }) : '';
+        if (warningDays < 0 || warningDays > 30) {
+            showMessage('Ngưỡng cảnh báo phải từ 0 đến 30 ngày', 'danger');
+            return;
+        }
+
+        const normalizedDate = moment(reportDate, 'DD/MM/YYYY').format('DD/MM/YYYY');
+        const normalizedEndDate = endDate ? moment(endDate, 'DD/MM/YYYY').format('DD/MM/YYYY') : '';
         const encodedDate = encodeURIComponent(normalizedDate);
         const encodedEndDate = encodeURIComponent(normalizedEndDate);
-        const url = reportType === 'range' ? `/report/${encodedDate}?type=${reportType}&area=${area}&endDate=${encodedEndDate}` : `/report/${encodedDate}?type=${reportType}&area=${area}`;
-        $.getJSON(url, function(report) {
-            console.log('Dữ liệu báo cáo:', JSON.stringify(report, null, 2));
-            initTable(report);
-            alert(`Báo cáo ${reportType} (${normalizedDate}${normalizedEndDate ? ' đến ' + normalizedEndDate : ''}): ${report.length} bệnh nhân.`);
+        const statusQuery = selectedStatuses.map(status => `status=${status}`).join('&');
+        const url = reportType === 'range'
+            ? `/report/${encodedDate}?type=${reportType}&area=${area}&endDate=${encodedEndDate}&${statusQuery}&warningDays=${warningDays}&page=${currentPage}&limit=100`
+            : `/report/${encodedDate}?type=${reportType}&area=${area}&${statusQuery}&warningDays=${warningDays}&page=${currentPage}&limit=100`;
+
+        currentReportParams = { reportDate, endDate, reportType, area, selectedStatuses, warningDays };
+
+        $.getJSON(url, function(response) {
+            initTable(response.data);
+            renderPagination(response.totalPages, currentPage);
+            showMessage(`Báo cáo ${reportType} (${normalizedDate}${normalizedEndDate ? ' đến ' + normalizedEndDate : ''}): ${response.total} bệnh nhân.`);
         }).fail(function(jqXHR, textStatus, error) {
-            console.error('Lỗi tạo báo cáo:', textStatus, error, jqXHR.responseText);
-            alert('Không thể tạo báo cáo: ' + (jqXHR.responseJSON?.error || error));
+            showMessage('Không thể tạo báo cáo: ' + (jqXHR.responseJSON?.error || error), 'danger');
             initTable([]);
+            $('#pagination').empty();
         });
+    }
+
+    $('#generateReportBtn').on('click', function() {
+        currentPage = 1;
+        generateReport();
     });
 
     // Xuất báo cáo ra Excel
@@ -297,28 +286,58 @@ $(document).ready(function() {
         const endDate = $('#endDate').val()?.trim();
         const reportType = $('#reportType').val();
         const area = $('#areaFilter').val();
-        console.log(`Yêu cầu xuất báo cáo: ngày=${reportDate}, kiểu=${reportType}, khu=${area}, ngày kết thúc=${endDate}`);
-        if (!reportDate || !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(reportDate)) {
-            alert('Vui lòng nhập ngày bắt đầu theo định dạng dd/mm/yyyy');
+        const warningDays = parseInt($('#warningDays').val()) || 7;
+        const selectedStatuses = $('.status-checkbox:checked').map(function() {
+            return $(this).val();
+        }).get();
+
+        if (!reportDate || !isValidDate(reportDate)) {
+            showMessage('Vui lòng nhập ngày bắt đầu hợp lệ (dd/mm/yyyy)', 'danger');
             return;
         }
-        if (reportType === 'range' && (!endDate || !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(endDate))) {
-            alert('Vui lòng nhập ngày kết thúc theo định dạng dd/mm/yyyy');
+        if (reportType === 'range') {
+            if (!endDate || !isValidDate(endDate)) {
+                showMessage('Vui lòng nhập ngày kết thúc hợp lệ (dd/mm/yyyy)', 'danger');
+                return;
+            }
+            if (moment(endDate, 'DD/MM/YYYY').isBefore(moment(reportDate, 'DD/MM/YYYY'))) {
+                showMessage('Ngày kết thúc phải sau ngày bắt đầu', 'danger');
+                return;
+            }
+        }
+        if (selectedStatuses.length === 0) {
+            showMessage('Vui lòng chọn ít nhất một trạng thái tái khám', 'danger');
             return;
         }
-        const normalizedDate = reportDate.replace(/(\d{1,2})\/(\d{1,2})\/(\d{4})/, (match, day, month, year) => {
-            return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
-        });
-        const normalizedEndDate = endDate ? endDate.replace(/(\d{1,2})\/(\d{1,2})\/(\d{4})/, (match, day, month, year) => {
-            return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
-        }) : '';
+        if (warningDays < 0 || warningDays > 30) {
+            showMessage('Ngưỡng cảnh báo phải từ 0 đến 30 ngày', 'danger');
+            return;
+        }
+
+        const normalizedDate = moment(reportDate, 'DD/MM/YYYY').format('DD/MM/YYYY');
+        const normalizedEndDate = endDate ? moment(endDate, 'DD/MM/YYYY').format('DD/MM/YYYY') : '';
         const encodedDate = encodeURIComponent(normalizedDate);
         const encodedEndDate = encodeURIComponent(normalizedEndDate);
-        const url = reportType === 'range' ? `/report/${encodedDate}/export?type=${reportType}&area=${area}&endDate=${encodedEndDate}` : `/report/${encodedDate}/export?type=${reportType}&area=${area}`;
+        const statusQuery = selectedStatuses.map(status => `status=${status}`).join('&');
+        const url = reportType === 'range'
+            ? `/report/${encodedDate}/export?type=${reportType}&area=${area}&endDate=${encodedEndDate}&${statusQuery}&warningDays=${warningDays}`
+            : `/report/${encodedDate}/export?type=${reportType}&area=${area}&${statusQuery}&warningDays=${warningDays}`;
         window.location.href = url;
     });
 
-    // Reset form khi mở modal thêm mới
+    // Reset bộ lọc
+    $('#resetFilterBtn').on('click', function() {
+        $('#areaFilter').val('all');
+        $('#reportDate').val(moment().format('DD/MM/YYYY'));
+        $('#endDate').val('');
+        $('#reportType').val('day');
+        $('.status-checkbox').prop('checked', true);
+        $('#warningDays').val(7);
+        currentPage = 1;
+        loadPatients();
+    });
+
+    // Reset form nhập liệu khi mở modal thêm mới
     $('#addPatientBtn').on('click', function() {
         isEditMode = false;
         $('#patientModalLabel').text('Thêm bệnh nhân mới');
@@ -331,14 +350,12 @@ $(document).ready(function() {
         const id = $(this).data('id');
         const data = table.rows().data().toArray().find(row => row.id === id);
         if (!data) {
-            console.error(`Không tìm thấy dữ liệu cho STT ${id}`);
-            alert('Không tìm thấy dữ liệu để chỉnh sửa!');
+            showMessage('Không tìm thấy dữ liệu để chỉnh sửa!', 'danger');
             return;
         }
-        console.log('Chỉnh sửa bệnh nhân:', JSON.stringify(data, null, 2));
         isEditMode = true;
         $('#patientModalLabel').text('Chỉnh sửa bệnh nhân');
-        $('#originalId').val(data.id);
+        $('#originalId').val(id);
         $('#id').val(data.id);
         $('#name').val(data.name);
         $('#year').val(data.year);
@@ -356,34 +373,68 @@ $(document).ready(function() {
         const id = $(this).data('id');
         const data = table.rows().data().toArray().find(row => row.id === id);
         if (!data) {
-            console.error(`Không tìm thấy dữ liệu cho STT ${id}`);
-            alert('Không tìm thấy dữ liệu để xóa!');
+            showMessage('Không tìm thấy dữ liệu để xóa!', 'danger');
             return;
         }
         if (confirm(`Bạn có chắc chắn muốn xóa bệnh nhân STT ${data.id} - ${data.name}?`)) {
-            console.log(`Gửi yêu cầu xóa STT ${id}`);
             $.ajax({
                 url: `/patients/${id}`,
                 type: 'DELETE',
                 success: function(response) {
-                    console.log('Phản hồi xóa:', response);
-                    alert('Xóa bệnh nhân thành công!');
+                    showMessage('Xóa bệnh nhân thành công!');
                     loadPatients();
                 },
                 error: function(jqXHR, textStatus, errorThrown) {
                     const errorMessage = jqXHR.responseJSON?.error || errorThrown;
-                    console.error('Lỗi xóa:', {
-                        status: jqXHR.status,
-                        textStatus: textStatus,
-                        error: errorMessage,
-                        responseText: jqXHR.responseText
-                    });
-                    alert('Lỗi: ' + errorMessage);
+                    showMessage('Lỗi xóa: ' + errorMessage, 'danger');
                 }
             });
         }
     });
 
-    // Tải danh sách ban đầu
+    // Nhập bệnh nhân từ file Excel
+    $('#importExcelBtn').on('click', function() {
+        const fileInput = $('#uploadExcel')[0];
+        if (!fileInput.files || fileInput.files.length === 0) {
+            showMessage('Vui lòng chọn file Excel', 'danger');
+            return;
+        }
+        const file = fileInput.files[0];
+        if (!file.name.endsWith('.xlsx')) {
+            showMessage('File phải có định dạng .xlsx', 'danger');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('excelFile', file);
+
+        $.ajax({
+            url: '/patients/import',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                showMessage(`Nhập thành công ${response.imported} bệnh nhân. ${response.errors.length} lỗi: ${response.errors.join(', ')}`);
+                loadPatients();
+                $('#uploadExcel').val('');
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                const errorMessage = jqXHR.responseJSON?.error || errorThrown;
+                showMessage('Lỗi nhập file: ' + errorMessage, 'danger');
+            }
+        });
+    });
+
+    // Cập nhật bảng khi thay đổi ngưỡng cảnh báo
+    $('#warningDays').on('change', function() {
+        if (currentReportParams.reportDate) {
+            generateReport();
+        } else {
+            loadPatients();
+        }
+    });
+
+    // Tải danh sách bệnh nhân ban đầu
     loadPatients();
 });
